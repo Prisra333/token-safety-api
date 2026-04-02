@@ -2,15 +2,60 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   if (req.method === "OPTIONS") return res.status(200).end();
 
+  const ALCHEMY_BASE = "https://base-mainnet.g.alchemy.com/v2/2r5WxhBAO4ALEJmlUtUUs";
+  const USDC_BASE = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+  const WALLET = process.env.WALLET_ADDRESS;
+  const PRICE = BigInt("10000"); // 0.01 USDC (6 decimals)
+
+  // x402決済検証
+  async function verifyPayment(txHash) {
+    try {
+      const r = await fetch(ALCHEMY_BASE, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          id: 1, jsonrpc: "2.0", method: "eth_getTransactionReceipt",
+          params: [txHash]
+        })
+      });
+      const data = await r.json();
+      const receipt = data.result;
+      if (!receipt || receipt.status !== "0x1") return false;
+
+      // USDCのTransferイベントを確認
+      const transferTopic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+      for (const log of receipt.logs) {
+        if (log.address.toLowerCase() !== USDC_BASE.toLowerCase()) continue;
+        if (log.topics[0] !== transferTopic) continue;
+        const to = "0x" + log.topics[2].slice(26);
+        const amount = BigInt(log.data);
+        if (to.toLowerCase() === WALLET.toLowerCase() && amount >= PRICE) {
+          return true;
+        }
+      }
+      return false;
+    } catch(e) { return false; }
+  }
+
   const payment = req.headers["x-payment"] || req.query.payment;
   if (!payment) {
     return res.status(402).json({
       error: "Payment Required",
       x402: {
         price: "0.01", currency: "USDC", chain: "base",
-        payTo: process.env.WALLET_ADDRESS || "0xYourWallet"
+        payTo: WALLET,
+        asset: USDC_BASE,
+        instruction: "Send 0.01 USDC on Base chain, then pass tx hash as ?payment=0x..."
       }
     });
+  }
+
+  // txハッシュの検証
+  if (payment.startsWith("0x") && payment.length === 66) {
+    const valid = await verifyPayment(payment);
+    if (!valid) {
+      return res.status(402).json({ error: "Payment not verified", message: "有効なUSDC送金が確認できませんでした" });
+    }
   }
 
   const address = req.query.address || req.body?.address;

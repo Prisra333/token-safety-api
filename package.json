@@ -1,6 +1,11 @@
 {
   "name": "token-safety-api",
   "version": "1.0.0",
+  "scripts": {
+    "build": "echo ok"
+  },
   "dependencies": {},
-  "engines": { "node": "18.x" }
+  "engines": {
+    "node": "18.x"
+  }
 }
